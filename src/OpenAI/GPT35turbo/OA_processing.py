@@ -9,6 +9,7 @@ config.read(os.path.join(mother_path, 'src/config.ini'))
 
 database = sqlite3.connect(os.path.join(mother_path, 'DataBase/OCAB_DB.db'))
 cursor = database.cursor()
+reply_ignore = config['Telegram']['reply_ignore'].split('| ')
 
 # Импорт библиотек
 
@@ -77,40 +78,6 @@ def openai_collecting_message(message_id, message_formated_text):
         # Проверяем ID отправителя сообщения, если 0 то это сообщение от бота
         sort_message_from_user(message_formated_text, message_id)
     return message_formated_text
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # if (((cursor.execute("SELECT answer_id FROM message_list WHERE message_id") is None)) or (cursor.execute("SELECT answer_id FROM message_list WHERE message_id") == 643885)):
-    #     openai_collecting_message(cursor.execute("SELECT answer_id FROM message_list WHERE message_id"))
-    # # проверяем что с новым сообщение длина всех сообщений в цепочке не будет превышать max_token_count
-    # count_length = 0
-    # for message in message_formated_text:
-    #     count_length += len(message['content'])
-    # if count_length + len(cursor.execute("SELECT message_text FROM message_list WHERE message_id = ?", (message_id,)).fetchone()) > max_token_count:
-    #     message_formated_text.pop(1)
-    # print(int(*(cursor.execute("SELECT message_sender FROM message_list WHERE message_id = ?", (message_id,)).fetchone())))
-    # if int(*(cursor.execute("SELECT message_sender FROM message_list WHERE message_id = ?", (message_id,)).fetchone())) == 0:
-    #     message_formated_text.append({
-    #         "role": "assistant",
-    #         "content": str(*(cursor.execute("SELECT message_text FROM message_list WHERE message_id = ?", (message_id,)).fetchone()))
-    #     })
-    # else:
-    #     message_formated_text.append({
-    #         "role": "user",
-    #         "content": str(*(cursor.execute("SELECT message_text FROM message_list WHERE message_id = ?", (message_id,)).fetchone()))
-    #     })
-
-
 
 
 def openai_message_processing(message_id):
