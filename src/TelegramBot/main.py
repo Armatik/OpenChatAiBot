@@ -69,10 +69,9 @@ async def start(message: types.Message):
     chat_stats = 1
     cursor.execute("INSERT INTO chat_list VALUES (?, ?, ?)", (chat_id, chat_role, chat_stats))
     database.commit()
-    await message.reply("Привет, я бот, который учится на основе модели GPT-3.5. "
-                        "Я могу поговорить с тобой на любую тему, но пока что я не очень умный, поэтому не обижайся, "
-                        "если я не пойму тебя. Чтобы начать общение со мной, напиши мне сообщение, начинающееся с "
-                        "слова Арма, например: Арма, как дела?")
+    await message.reply(
+            f"{config['Telegram']['start_answer']}",
+            parse_mode="Markdown")
 
 from src.OpenAI.GPT35turbo.OA_processing import openai_message_processing
 
