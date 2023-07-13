@@ -96,7 +96,7 @@ async def in_message(message: types.Message):
     else:
         # Запись сообщения в базу данных
         cursor.execute("INSERT INTO message_list VALUES (?, ?, ?, ?)",
-                       (message.message_id, message.text, message.from_user.id,  None))
+                       (message.message_id, message.text, message.from_user.id,  0))
         if message.reply_to_message is not None:
             # Запись ответа на сообщение в базу данных
             cursor.execute("UPDATE message_list SET answer_id = ? WHERE message_id = ?",
