@@ -6,12 +6,14 @@ import openai
 import configparser
 import sqlite3
 import asyncio
+import sys
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.utils.exceptions import MessageCantBeDeleted, MessageToDeleteNotFound
 
 mother_path = os.path.dirname(os.path.dirname(os.getcwd()))
+sys.path.insert(1, mother_path)
 
 
 # Импорт переменных из файла .ini
@@ -24,6 +26,7 @@ bot_trigger_all = (config['Telegram']['bot_trigger_all']).split('|')
 # удаление лишних элементов массивов
 bot_trigger_front.remove('')
 bot_trigger_all.remove('')
+DB_message_limit = int(config['DataBase']['message_limit'])
 
 # Инициализация бота
 
@@ -83,8 +86,11 @@ async def delete_message(message: types.Message, sleep_time: int = 0):
 async def in_message(message: types.Message):
     chat_id = message.chat.id
     # Получение сообщений в чате, и запись их в базу данных
-    # Проверка на то, что сообщение не пустое и не отправлено в чате содержащим ChatType = 1 в базе данных chatlist
-    if (message.chat.type != "group" or message.chat.type != "supergroup") and \
+    if (message.chat.type == "private" or message.chat.type == "channel"):
+        await message.reply(
+            f"{config['Telegram']['private_answer']}",
+            parse_mode="Markdown")
+    elif (message.chat.type != "group" or message.chat.type != "supergroup") and \
             message.text != '' and message.text != ' ' and \
             (cursor.execute("SELECT chat_role FROM chat_list WHERE chat_id;") == 1): return None
     else:
@@ -118,15 +124,17 @@ async def in_message(message: types.Message):
             if response is None:
                 bot_message_id = await message.reply("Я не понял тебя, попробуй перефразировать")
                 asyncio.create_task(delete_message(temp_msg, 0))
-                #заносим сообщение в базу данных в качестве message_id пишем id сообщения которое отправил бот
+                # заносим сообщение в базу данных в качестве message_id пишем id сообщения которое отправил бот
                 cursor.execute("INSERT INTO message_list VALUES (?, ?, ?, ?)",
                                     (bot_message_id, "Я не понял тебя, попробуй перефразировать", 0, message.message_id))
             else:
                 bot_message_id = await message.reply(response['choices'][0]['message']['content'], parse_mode="markdown")
                 asyncio.create_task(delete_message(temp_msg, 0))
-                #заносим сообщение в базу данных в качестве message_id мы пишем id сообщения в bot_message_id
+                # заносим сообщение в базу данных в качестве message_id мы пишем id сообщения в bot_message_id
                 cursor.execute("INSERT INTO message_list VALUES (?, ?, ?, ?)",
                                     (bot_message_id.message_id, response['choices'][0]['message']['content'], 0, message.message_id))
+            # очищаем базу данных от старых сообщений
+            cursor.execute("DELETE FROM message_list WHERE message_id < ?", (bot_message_id.message_id - DB_message_limit,))
             database.commit()
 
 
