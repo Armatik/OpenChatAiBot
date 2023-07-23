@@ -14,6 +14,8 @@ cursor = database.cursor()
 reply_ignore = config['Telegram']['reply_ignore'].split('| ')
 reply_ignore = list(map(int, reply_ignore))
 
+min_token_for_answer = int(config['Openai']['min_token_for_answer'])
+
 # Импорт библиотек
 
 import openai
@@ -53,10 +55,11 @@ def openai_response(message_formated_text):
         elif 'Bad gateway.' in str(ex):
             response = (
                 'Ой, где я? Кажется кто то перерзал мой интернет кабель, подожди немного пока я его починю')
-        #запись ошибки в лог с указанием времени
+        #запись ошибки в лог с указанием времени и даты
         with open(os.path.join(mother_path, 'src/OpenAI/GPT35turbo/log.txt'), 'a') as log_file:
-            log_file.write(f'{time.strftime("%H:%M:%S", time.localtime())} {str(ex)}\n')
+            log_file.write('\n' + time.strftime("%d.%m.%Y %H:%M:%S") + ' ' + str(ex))
     #Проверка на то что ответ не содержит ошибку
+    count_length = 0
 
     return response
 
@@ -81,8 +84,8 @@ def sort_message_from_user(message_formated_text, message_id):
     count_length = 0
     for message in message_formated_text:
         count_length += len(message['content'])
-    if count_length > max_token_count-800:
-        message_formated_text.pop(1)
+        if count_length > max_token_count-min_token_for_answer:
+            message_formated_text.pop(1)
     return message_formated_text
 
 def openai_collecting_message(message_id, message_formated_text):
