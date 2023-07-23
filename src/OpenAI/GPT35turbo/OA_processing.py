@@ -1,6 +1,8 @@
 import sqlite3
 import os
 import configparser
+from openai import OpenAIError
+import time
 
 mother_path = os.path.dirname(os.path.dirname(os.getcwd()))
 
@@ -10,6 +12,7 @@ config.read(os.path.join(mother_path, 'src/config.ini'))
 database = sqlite3.connect(os.path.join(mother_path, 'DataBase/OCAB_DB.db'))
 cursor = database.cursor()
 reply_ignore = config['Telegram']['reply_ignore'].split('| ')
+reply_ignore = list(map(int, reply_ignore))
 
 # Импорт библиотек
 
@@ -23,6 +26,11 @@ base_message_formated_text = [
     }
 ]
 
+# Создание файла лога если его нет
+if not os.path.exists(os.path.join(mother_path, 'src/OpenAI/GPT35turbo/log.txt')):
+    with open(os.path.join(mother_path, 'src/OpenAI/GPT35turbo/log.txt'), 'w') as log_file:
+        log_file.write('')
+
 
 def openai_response(message_formated_text):
     # Запуск OpenAI
@@ -33,11 +41,23 @@ def openai_response(message_formated_text):
         print(message["content"])
         count_length += len(message["content"])
     print(count_length)
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=message_formated_text,
-        max_tokens=max_token_count - count_length
-    )
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=message_formated_text,
+            max_tokens=max_token_count - count_length
+        )
+    except OpenAIError as ex:
+        if 'on requests per min. Limit: 3 / min. Please try again' in str(ex):
+            response = ('Извини мой процессор перегрелся, дай мне минутку отдохнуть')
+        elif 'Bad gateway.' in str(ex):
+            response = (
+                'Ой, где я? Кажется кто то перерзал мой интернет кабель, подожди немного пока я его починю')
+        #запись ошибки в лог с указанием времени
+        with open(os.path.join(mother_path, 'src/OpenAI/GPT35turbo/log.txt'), 'a') as log_file:
+            log_file.write(f'{time.strftime("%H:%M:%S", time.localtime())} {str(ex)}\n')
+    #Проверка на то что ответ не содержит ошибку
+
     return response
 
 def sort_message_from_user(message_formated_text, message_id):
@@ -68,7 +88,7 @@ def sort_message_from_user(message_formated_text, message_id):
 def openai_collecting_message(message_id, message_formated_text):
     # собирает цепочку сообщений для OpenAI длинной до max_token_count
     # проверяем что сообщение отвечает на другое сообщение
-    if int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())) not in (0, 643885, 476959, 1, 476977, 633077, 630664, 476966, 634567):
+    if int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())) not in reply_ignore:
         # Продолжаем искать ответы на сообщения
         print(int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())))
         message_formated_text = openai_collecting_message(int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())), message_formated_text)
