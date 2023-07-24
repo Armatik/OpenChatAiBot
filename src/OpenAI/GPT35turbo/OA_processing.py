@@ -21,13 +21,6 @@ min_token_for_answer = int(config['Openai']['min_token_for_answer'])
 import openai
 max_token_count = int(config['Openai']['max_token_count'])
 
-base_message_formated_text = [
-    {
-        "role": "system",
-        "content": config['Openai']['story_model']
-    }
-]
-
 # Создание файла лога если его нет
 if not os.path.exists(os.path.join(mother_path, 'src/OpenAI/GPT35turbo/log.txt')):
     with open(os.path.join(mother_path, 'src/OpenAI/GPT35turbo/log.txt'), 'w') as log_file:
@@ -37,12 +30,12 @@ if not os.path.exists(os.path.join(mother_path, 'src/OpenAI/GPT35turbo/log.txt')
 def openai_response(message_formated_text):
     # Запуск OpenAI
     # Считаем размер полученного текста
-    print(message_formated_text)
+    #print(message_formated_text)
     count_length = 0
     for message in message_formated_text:
         print(message["content"])
         count_length += len(message["content"])
-    print(count_length)
+    #print(count_length)
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -64,8 +57,8 @@ def openai_response(message_formated_text):
     return response
 
 def sort_message_from_user(message_formated_text, message_id):
-    print(int(*(
-        cursor.execute("SELECT message_sender FROM message_list WHERE message_id = ?", (message_id,)).fetchone())))
+    # print(int(*(
+    #    cursor.execute("SELECT message_sender FROM message_list WHERE message_id = ?", (message_id,)).fetchone())))
     if int(*(
             cursor.execute("SELECT message_sender FROM message_list WHERE message_id = ?",
                            (message_id,)).fetchone())) == 0:
@@ -91,9 +84,11 @@ def sort_message_from_user(message_formated_text, message_id):
 def openai_collecting_message(message_id, message_formated_text):
     # собирает цепочку сообщений для OpenAI длинной до max_token_count
     # проверяем что сообщение отвечает на другое сообщение
+    #print(int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())))
+    #print(reply_ignore)
     if int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())) not in reply_ignore:
         # Продолжаем искать ответы на сообщения
-        print(int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())))
+        #print(int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())))
         message_formated_text = openai_collecting_message(int(*(cursor.execute("SELECT answer_id FROM message_list WHERE message_id = ?", (message_id,)).fetchone())), message_formated_text)
         #Проверяем ID отправителя сообщения, если 0 то это сообщение от бота
         sort_message_from_user(message_formated_text, message_id)
@@ -109,11 +104,12 @@ def openai_message_processing(message_id):
         return None
     else:
         # проверяем на то что сообщение влезает в max_token_count с учётом message_formated_text
-        #print((len(str(cursor.execute("SELECT message_text FROM message_list WHERE message_id")))))
-        #print(len(message_formated_text[0]['content']))
-        #print(max_token_count)
-        #print(max_token_count - len(message_formated_text[0]['content']))
-        message_formated_text = base_message_formated_text
+        message_formated_text = [
+            {
+                "role": "system",
+                "content": config['Openai']['story_model']
+            }
+        ]
         if ((len(str(cursor.execute("SELECT message_text FROM message_list WHERE message_id")))) < (max_token_count - len(message_formated_text[0]['content']))):
             message_formated_text = openai_collecting_message(message_id, message_formated_text)
             response = openai_response(message_formated_text)
