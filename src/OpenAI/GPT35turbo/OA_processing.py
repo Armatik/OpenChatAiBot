@@ -13,6 +13,7 @@ database = sqlite3.connect(os.path.join(mother_path, 'DataBase/OCAB_DB.db'))
 cursor = database.cursor()
 reply_ignore = config['Telegram']['reply_ignore'].split('| ')
 reply_ignore = list(map(int, reply_ignore))
+#print(reply_ignore)
 
 min_token_for_answer = int(config['Openai']['min_token_for_answer'])
 
@@ -33,7 +34,7 @@ def openai_response(message_formated_text):
     #print(message_formated_text)
     count_length = 0
     for message in message_formated_text:
-        print(message["content"])
+        #print(message["content"])
         count_length += len(message["content"])
     #print(count_length)
     try:
@@ -77,8 +78,10 @@ def sort_message_from_user(message_formated_text, message_id):
     count_length = 0
     for message in message_formated_text:
         count_length += len(message['content'])
-        if count_length > max_token_count-min_token_for_answer:
-            message_formated_text.pop(1)
+    while count_length > max_token_count-min_token_for_answer:
+        message_formated_text.pop(1)
+        for message in message_formated_text:
+            count_length += len(message['content'])
     return message_formated_text
 
 def openai_collecting_message(message_id, message_formated_text):

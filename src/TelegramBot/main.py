@@ -103,32 +103,41 @@ async def in_message(message: types.Message):
         database.commit()
         # Обработка сообщения OpenAI
         send_answer = False
+        typing_mode = False
         # импортируем массив триггеров из файла .ini
         if message.reply_to_message and message.reply_to_message.from_user.id == (await bot.me).id:
             send_answer = True
+            typing_mode = True
         for trigger in bot_trigger_all:
             if trigger.lower() in message.text.lower():
                 send_answer = True
+                typing_mode = False
         for trigger in bot_trigger_front:
             if message.text.lower().startswith(trigger.lower()):
                 send_answer = True
+                typing_mode = False
 
         if send_answer:
-            your_id = message.from_id
-            your_name = message.from_user.username
-            temp_msg = await message.reply(
-                f"[{your_name}](tg://user?id={str(your_id)}), Подожди немного и я обязательно отвечу тебе!",
-                parse_mode="Markdown")
+            if typing_mode is False:
+                your_id = message.from_id
+                your_name = message.from_user.username
+                temp_msg = await message.reply(
+                    f"[{your_name}](tg://user?id={str(your_id)}), Подожди немного и я обязательно отвечу тебе!",
+                    parse_mode="Markdown")
+            # Пишем что бот печатает
+            await bot.send_chat_action(message.chat.id, "typing")
             response = openai_message_processing(message.message_id)
             if response is None:
                 bot_message_id = await message.reply("Я не понял тебя, попробуй перефразировать")
-                asyncio.create_task(delete_message(temp_msg, 0))
+                if typing_mode is False:
+                    asyncio.create_task(delete_message(temp_msg, 0))
                 # заносим сообщение в базу данных в качестве message_id пишем id сообщения которое отправил бот
                 cursor.execute("INSERT INTO message_list VALUES (?, ?, ?, ?)",
                                     (bot_message_id, "Я не понял тебя, попробуй перефразировать", 0, message.message_id))
             else:
                 bot_message_id = await message.reply(response['choices'][0]['message']['content'], parse_mode="markdown")
-                asyncio.create_task(delete_message(temp_msg, 0))
+                if typing_mode is False:
+                    asyncio.create_task(delete_message(temp_msg, 0))
                 # заносим сообщение в базу данных в качестве message_id мы пишем id сообщения в bot_message_id
                 cursor.execute("INSERT INTO message_list VALUES (?, ?, ?, ?)",
                                     (bot_message_id.message_id, response['choices'][0]['message']['content'], 0, message.message_id))
