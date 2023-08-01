@@ -33,9 +33,16 @@ def openai_response(message_formated_text):
     # Считаем размер полученного текста
     #print(message_formated_text)
     count_length = 0
+    if len(message_formated_text) == 0:
+        message_formated_text = [
+            {
+                "role": "user",
+                "content": "Напиши короткий ответ говорящий что контекст сообщения слишком длинный и попроси задать вопрос отдельно без ответа на другие сообщения по ключевому слову"
+            }
+        ]
     for message in message_formated_text:
         #print(message["content"])
-        count_length += len(message["content"])
+        count_length += int(len(message["content"]))
     #print(count_length)
     try:
         response = openai.ChatCompletion.create(
@@ -74,14 +81,7 @@ def sort_message_from_user(message_formated_text, message_id):
             "content": str(*(cursor.execute("SELECT message_text FROM message_list WHERE message_id = ?",
                                             (message_id,)).fetchone()))
         })
-    #Проверка что длина всех сообщений в кортеже не превышает max_token_count-500
-    count_length = 0
-    for message in message_formated_text:
-        count_length += len(message['content'])
-    while count_length > max_token_count-min_token_for_answer:
-        message_formated_text.pop(1)
-        for message in message_formated_text:
-            count_length += len(message['content'])
+    #Проверка что длина всех сообщений в кортеже не превышает max_token_count-min_token_for_answer
     return message_formated_text
 
 def openai_collecting_message(message_id, message_formated_text):
@@ -115,6 +115,17 @@ def openai_message_processing(message_id):
         ]
         if ((len(str(cursor.execute("SELECT message_text FROM message_list WHERE message_id")))) < (max_token_count - len(message_formated_text[0]['content']))):
             message_formated_text = openai_collecting_message(message_id, message_formated_text)
+            count_length = 0
+            # Обработка невозможности ответить на сообщение
+            try:
+                for message in message_formated_text:
+                    count_length += len(message['content'])
+                while count_length > max_token_count - min_token_for_answer:
+                    message_formated_text.pop(1)
+                    for message in message_formated_text:
+                        count_length += len(message['content'])
+            except IndexError:
+                message_formated_text = ""
             response = openai_response(message_formated_text)
             return response
         else:
