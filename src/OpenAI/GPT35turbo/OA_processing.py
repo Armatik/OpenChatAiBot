@@ -122,10 +122,16 @@ def openai_message_processing(message_id):
                     count_length += len(message['content'])
                 while count_length > max_token_count - min_token_for_answer:
                     message_formated_text.pop(1)
+                    count_length = 0
                     for message in message_formated_text:
                         count_length += len(message['content'])
             except IndexError:
-                message_formated_text = ""
+                message_formated_text = [
+            {
+                "role": "system",
+                "content": "Выведи сообщение об ошибке."
+            }
+        ]
             response = openai_response(message_formated_text)
             return response
         else:
