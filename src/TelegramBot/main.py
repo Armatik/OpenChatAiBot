@@ -87,6 +87,10 @@ async def get_role_name(rolenum):
         role = config['Roles']['admin']
     return role
 
+async def get_role(id):
+    #получение роли пользователя
+    user_role = cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (id,)).fetchone()[0]
+    return await get_role_name(user_role)
 
 async def check_admin(id, chat_id):
     #Проверка что человек есть в списке администраторов чата
@@ -106,10 +110,30 @@ async def check_moderator(id):
         return False
 
 
+async def check_user(id):
+    #Проверка что человек имеет роль пользователя
+    if cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (id,)).fetchone()[0] == 0:
+        return True
+    else:
+        return False
+
+
+async def save_message(message):
+    #Сохранение сообщения в базу данных
+    cursor.execute("INSERT INTO message_list VALUES (?, ?, ?, ?)", (message.message_id, message.text, message.from_user.id, 0))
+    if message.reply_to_message is not None:
+        cursor.execute("UPDATE message_list SET answer_id = ? WHERE message_id = ?", (message.reply_to_message.message_id, message.message_id))
+    #Если отправитель не зарегистрирован в базе данных, то добавляем его
+    if cursor.execute("SELECT user_id FROM user_list WHERE user_id = ?", (message.from_user.id,)).fetchone() is None:
+        cursor.execute("INSERT INTO user_list VALUES (?, ?, ?, ?)", (message.from_user.id, message.from_user.username, 0, 1))
+    #Добавляем статистику в чат и в данные пользователя, если пользователь не бот.
+    cursor.execute("UPDATE chat_list SET chat_stats = chat_stats + 1 WHERE chat_id = ?", (message.chat.id,))
+    cursor.execute("UPDATE user_list SET user_stats = user_stats + 1 WHERE user_id = ?", (message.from_user.id,))
+    database.commit()
+
 
 async def time_to_seconds(time):
     #Конвертация текстового указания времени по типу 3h, 5m, 10s в минуты
-    print("t_to_s")
     if time[-1] == 'd':
         return int(time[:-1])*86400
     elif time[-1] == 'h':
@@ -123,61 +147,74 @@ async def time_to_seconds(time):
 async def short_time_to_time(time):
     #Конвертация времени в длинное название
     if time[-1] == 'd':
-        return f"{time[:-1]} дней"
+        return str(f"{time[0:-1]} дней")
     elif time[-1] == 'h':
-        return f"{time[:-1]} часов"
+        return str(f"{time[0:-1]} часов")
     elif time[-1] == 'm':
-        return f"{time[:-1]} минут"
+        return str(f"{time[0:-1]} минут")
     elif time[-1] == 's':
-        return f"{time[:-1]} секунд"
+        return str(f"{time[0:-1]} секунд")
 
 
 @dp.message_handler(commands=['mute'])
 async def mute(message: types.Message):
     #Проверка что отправитель является администратором чата
-    print("start mute")
-    if await check_moderator(message.from_user.id):
-        print("moderator checked")
-        #Проверка отвечает ли сообщение на другое сообщение
-        if message.reply_to_message is not None:
-            time = message.text.split(' ')[1]
-            #получаем id отправителя сообщение на которое отвечает message
-            target_id = message.reply_to_message.from_user.id
-            target_name = cursor.execute("SELECT user_name FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0]
-            #Проверка что человек пользователь
-            if cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0] == 0:
-                #ограничения прав пользователя по отправке сообщений на time секунд
-                time_sec = await time_to_seconds(message.text.split(' ')[1])
-                if time_sec <= 30 or time_sec >= 31536000:
-                    await message.reply("Время мута должно быть больше 30 секунд и меньше 365 дней")
+    try:
+        if await check_moderator(message.from_user.id):
+            #Проверка отвечает ли сообщение на другое сообщение
+            if message.reply_to_message is not None:
+                time = message.text.split(' ')[1]
+                #получаем id отправителя сообщение на которое отвечает message
+                target_id = message.reply_to_message.from_user.id
+                target_name = cursor.execute("SELECT user_name FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0]
+                #Проверка что человек пользователь
+                if cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0] == 0:
+                    #ограничения прав пользователя по отправке сообщений на time секунд
+                    time_sec = await time_to_seconds(message.text.split(' ')[1])
+                    if time_sec <= 30 or time_sec >= 31536000:
+                        await message.reply("Время мута должно быть больше 30 секунд и меньше 365 дней")
+                        return
+                    date_string = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    date_time = datetime.datetime.strptime(date_string, "%Y-%m-%d %H:%M:%S")
+                    unix_time = int(mktime(date_time.timetuple()))
+                    await bot.restrict_chat_member(message.chat.id, target_id, until_date=unix_time+time_sec, permissions=types.ChatPermissions(can_send_messages=False))
+                    await message.reply(
+                        f"Пользователь {target_name} замьючен на {await short_time_to_time(time)}")
+                else:
+                    await message.reply(f"Пользователь [{target_name}](tg://user?id={target_id}) является {await get_role(target_id)} и не может быть замьючен",
+                                        parse_mode='Markdown')
                     return
-                await bot.restrict_chat_member(message.chat.id, target_id, until_date=time.time()+time_sec)
-                await message.reply(
-                    f"Пользователь {target_name} замьючен на {short_time_to_time(time)}")
-        else:
-            target_tag = message.text.split(' ')[1]
-            target_tag = target_tag[1:]
-            target_id = int(cursor.execute("SELECT user_id FROM user_list WHERE user_name = ?", (target_tag,)).fetchone()[0])
-            target_name = cursor.execute("SELECT user_name FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0]
-            #ограничения прав пользователя по отправке сообщений на time секунд
-            time_mute = message.text.split(' ')[2]
+            else:
+                target_tag = message.text.split(' ')[1]
+                target_tag = target_tag[1:]
+                target_id = int(cursor.execute("SELECT user_id FROM user_list WHERE user_name = ?", (target_tag,)).fetchone()[0])
+                target_name = cursor.execute("SELECT user_name FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0]
+                #ограничения прав пользователя по отправке сообщений на time секунд
+                time_mute = message.text.split(' ')[2]
 
-            if cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0] == 0:
-                #ограничения прав пользователя по отправке сообщений на time секунд
-                time_sec = await time_to_seconds(message.text.split(' ')[2])
-                if time_sec <= 30 or time_sec >= 31536000:
-                    await message.reply("Время мута должно быть больше 30 секунд и меньше 365 дней")
+                if cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0] == 0:
+                    #ограничения прав пользователя по отправке сообщений на time секунд
+                    time_sec = await time_to_seconds(message.text.split(' ')[2])
+                    if time_sec <= 30 or time_sec >= 31536000:
+                        await message.reply("Время мута должно быть больше 30 секунд и меньше 365 дней")
+                        return
+                    date_string = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    date_time = datetime.datetime.strptime(date_string, "%Y-%m-%d %H:%M:%S")
+                    unix_time = int(mktime(date_time.timetuple()))
+                    await bot.restrict_chat_member(message.chat.id, target_id, until_date=unix_time+time_sec, permissions=types.ChatPermissions(can_send_messages=False))
+                    await message.reply(
+                        f"Пользователь {target_name} замьючен на {await short_time_to_time(time_mute)}.")
+                else:
+                    await message.reply(f"Пользователь [{target_name}](tg://user?id={target_id}) является {await get_role(target_id)} и не может быть замьючен",
+                                        parse_mode="Markdown")
                     return
-                date_string = "2022-01-01 00:00:00"
-                date_time = datetime.datetime.strptime(date_string, "%Y-%m-%d %H:%M:%S")
-                unix_time = int(mktime(date_time.timetuple()))
-                await bot.restrict_chat_member(message.chat.id, target_id, until_date=unix_time+time_sec, permissions=types.ChatPermissions(can_send_messages=False))
-                await message.reply(
-                    f"Пользователь {target_name} замьючен на {short_time_to_time(time_mute)}.")
+    except:
+        await message.reply("Ошибка данных. Возможно пользователь ещё ничего не написал.")
 
 
 @dp.message_handler(commands=['unmute'])
 async def unmute(message: types.Message):
+    chat_id= message.chat.id
     if await check_moderator(message.from_user.id):
         if message.reply_to_message is not None:
             target_id = message.reply_to_message.from_user.id
@@ -191,14 +228,41 @@ async def unmute(message: types.Message):
             target_tag = target_tag[1:]
             target_id = int(cursor.execute("SELECT user_id FROM user_list WHERE user_name = ?", (target_tag,)).fetchone()[0])
             target_name = cursor.execute("SELECT user_name FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0]
+            #получаем стандартные права чата
+
             if cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0] == 0:
-                await bot.restrict_chat_member(message.chat.id, target_id, until_date=0, permissions=types.ChatPermissions(can_send_messages=True))
+                #возвращаем пользователю стандартные права как у новых пользователей
+                chat_permisson = await bot.get_chat(chat_id)
+                await bot.restrict_chat_member(message.chat.id, target_id, until_date=0, permissions=chat_permisson.permissions)
                 await message.reply(
                     f"Пользователь [{target_name}](tg://user?id={target_id}) размьючен",
                     parse_mode="Markdown")
 
 
-@dp.message_handler(commands=['chat_info'])
+#обрабатываем вход пользователя в чат
+@dp.message_handler(content_types=['new_chat_members'])
+async def new_chat_members(message: types.Message):
+    #проверяем что пользователь не бот
+    if not message.new_chat_members[0].is_bot:
+        #Заносим пользователя в базу данных
+        cursor.execute("INSERT INTO user_list VALUES (?, ?, ?, ?)", (message.new_chat_members[0].id, message.new_chat_members[0].username, 0, 0))
+
+# @dp.message_handler(commands=['mail'])
+# async def mail(message: types.Message):
+#     #получаем тег пользователя которому должны написать в лс
+#     target_tag = message.text.split(' ')[1]
+#     target_tag = target_tag[1:]
+#     print(target_tag)
+#     #получаем id пользователя которому должны написать в лс
+#     target_id = int(cursor.execute("SELECT user_id FROM user_list WHERE user_name = ?", (target_tag,)).fetchone()[0])
+#     print(target_id)
+#     #пишем пользователю в лс, привет {его имя}
+#     await bot.send_message(target_id, f"Привет {target_tag}! Я бот чата {message.chat.title}. {message.from_user.first_name} хочет с тобой связаться. Напиши ему в лс.")
+#     #пишем пользователю в чат, что его сообщение отправлено
+#     await message.reply(f"Сообщение отправлено пользователю {target_tag}")
+
+
+@dp.message_handler(commands=['chatinfo'])
 async def chat_info(message: types.Message):
     #Выводит информацию о чате. Название, количество пользователей, количество администраторов, количество модераторов, количество сообщений.
     if await check_moderator(message.from_user.id):
@@ -207,14 +271,14 @@ async def chat_info(message: types.Message):
         chat_members = await bot.get_chat_members_count(chat_id)
         chat_admins = await bot.get_chat_administrators(chat_id)
         chat_moderators = cursor.execute("SELECT COUNT(user_id) FROM user_list WHERE user_role = 1").fetchone()[0]
-        chat_messages = cursor.execute("SELECT COUNT(message_id) FROM message_list WHERE chat_id = ?", (chat_id,)).fetchone()[0]
-        print("ready")
+        chat_messages = cursor.execute("SELECT chat_stats FROM chat_list WHERE chat_id = ?", (chat_id,)).fetchone()[0]
         await message.reply(
             f"Название чата: {chat_title}\n"
-            f"Количество пользователей: {chat_members}\n"
-            f"Количество администраторов: {len(chat_admins)}\n"
-            f"Количество модераторов: {chat_moderators}\n"
-            f"Количество сообщений: {chat_messages}")
+            f"Кол-во пользователей: {chat_members}\n"
+            f"Кол-во администраторов: {len(chat_admins)}\n"
+            f"Кол-во модераторов: {chat_moderators}\n"
+            f"Кол-во сообщений: {chat_messages}")
+        await top10(message)
     else:
         await message.reply(
             f"У вас недостаточно прав для выполнения этой команды.")
@@ -243,6 +307,7 @@ async def start(message: types.Message):
         cursor.execute("ALTER TABLE user_list ADD COLUMN user_name TEXT")
         database.commit()
         await message.reply("База данных пользователей реструктурирована.")
+    # Проверка что все участники чата есть в базе данных
 
 
 @dp.message_handler(commands=['top10'])
@@ -323,13 +388,17 @@ async def aboutme(message: types.Message):
 
 @dp.message_handler(commands=['setrole'])
 async def setrole(message: types.Message):
-    user_role = cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (message.from_user.id,)).fetchone()
-    user_name = message.from_user.username
-    target_name = message.text.split()[1]
-    target_name = target_name[1:]
-    target_role = cursor.execute("SELECT user_role FROM user_list WHERE user_name = ?", (target_name,)).fetchone()[0]
-    user_id = cursor.execute("SELECT user_id FROM user_list WHERE user_name = ?", (target_name,)).fetchone()
-    user_id = user_id[0]
+    try:
+        user_role = cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (message.from_user.id,)).fetchone()
+        user_name = message.from_user.username
+        target_name = message.text.split()[1]
+        target_name = target_name[1:]
+        target_role = cursor.execute("SELECT user_role FROM user_list WHERE user_name = ?", (target_name,)).fetchone()[0]
+        user_id = cursor.execute("SELECT user_id FROM user_list WHERE user_name = ?", (target_name,)).fetchone()
+        user_id = user_id[0]
+    except:
+        await message.reply("Пользователь не найден!")
+        return
     if await check_admin(user_id, message.chat.id) and target_role == 2:
         await message.reply("Вы не можете изменить роль этому пользователю!")
     else:
@@ -363,7 +432,7 @@ async def setrole(message: types.Message):
 
 @dp.message_handler(commands=['about'])
 async def about(message: types.Message):
-    #проверка что в сообщении есть тег пользователя
+    # проверка что в сообщении есть тег пользователя
     if len(message.text.split()) == 2:
         try:
             target_name = message.text.split()[1]
@@ -379,7 +448,7 @@ async def about(message: types.Message):
         user_role = cursor.execute("SELECT user_role FROM user_list WHERE user_id = ?", (target_id,)).fetchone()[0]
         user_role = await get_role_name(user_role)
         await message.reply(
-            f"Имя: {target_name}\n"    
+            f"Имя: {target_name}\n"
             f"Кол-во сообщений: {user_stats}\n"
             f"Роль: {user_role}")
     else:
@@ -407,28 +476,7 @@ async def in_message(message: types.Message):
             (cursor.execute("SELECT chat_role FROM chat_list WHERE chat_id;") == 1): return None
     else:
         # Запись сообщения в базу данных
-        cursor.execute("INSERT INTO message_list VALUES (?, ?, ?, ?)",
-                       (message.message_id, message.text, message.from_user.id,  0))
-        #Проверка что отправителя сообщения нет в базе данных
-        if cursor.execute("SELECT user_id FROM user_list WHERE user_id = ?", (message.from_user.id,)).fetchone() is None:
-            # Запись отправителя сообщения в базу данных
-            cursor.execute("INSERT INTO user_list VALUES (?, ?, ?, ?)",
-                           (message.from_user.id, message.from_user.username, 1, 0))
-        #Запись статистики отправителя сообщения в базу данных
-        else:
-            cursor.execute("UPDATE user_list SET user_stats = user_stats + 1 WHERE user_id = ?",
-                           (message.from_user.id,))
-            #Записываем информацию в статистику чата.
-            cursor.execute("UPDATE chat_list SET chat_stats = chat_stats + 1 WHERE chat_id = ?", (chat_id,))
-            #Проверка на наличие имени пользователя в базе данных
-            if cursor.execute("SELECT user_name FROM user_list WHERE user_id = ?", (message.from_user.id,)).fetchone() is not message.from_user.username:
-                cursor.execute("UPDATE user_list SET user_name = ? WHERE user_id = ?",
-                               (message.from_user.username, message.from_user.id))
-        if message.reply_to_message is not None:
-            # Запись ответа на сообщение в базу данных
-            cursor.execute("UPDATE message_list SET answer_id = ? WHERE message_id = ?",
-                           (message.reply_to_message.message_id, message.message_id))
-        database.commit()
+        await save_message(message)
         # Обработка сообщения OpenAI
         send_answer = False
         typing_mode = False
@@ -454,6 +502,7 @@ async def in_message(message: types.Message):
                     parse_mode="Markdown")
             # Пишем что бот печатает
             await bot.send_chat_action(message.chat.id, "typing")
+            # Получаем ответ от OpenAI
             response = openai_message_processing(message.message_id)
             if response is None:
                 bot_message_id = await message.reply("Я не понял тебя, попробуй перефразировать")
